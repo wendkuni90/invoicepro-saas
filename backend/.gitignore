@@ -1,0 +1,29 @@
+# Environnement virtuel
+venv/
+
+# Fichier .env
+.env
+
+# Fichiers Python compilés
+__pycache__/
+*.py[cod]
+*.pyc
+*.cache
+
+# Fichiers de migration Django
+migrations/
+
+# Fichiers de configuration de l'IDE
+.idea/
+
+# Fichiers de configuration de l'IDE
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# Fichiers SQLite
+db.sqlite3
+*.sqlite3
+
+# Logs
+*.log
