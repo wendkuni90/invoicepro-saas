@@ -30,10 +30,20 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    # Mes applications peuvent être ajoutées ici
+    # Mes applications tierces
     'rest_framework',
     'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
+    # Mes applications locales
+    'accounts',
+    'audit',
+    'clients',
+    'companies',
+    'invoices',
+    'notifications',
+    'products',
+    'settings',
+    'subscriptions',
 ]
 
 MIDDLEWARE = [
@@ -123,3 +133,6 @@ SIMPLE_JWT = {
     "BLACKLIST_AFTER_ROTATION": env.bool("BLACKLIST_AFTER_ROTATION", True),
     "ROTATE_REFRESH_TOKENS": env.bool("ROTATE_REFRESH_TOKENS", True),
 }
+
+# Configuration pour utiliser le modèle utilisateur personnalisé
+AUTH_USER_MODEL = 'accounts.User'
