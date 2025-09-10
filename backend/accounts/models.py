@@ -18,11 +18,18 @@ class User(AbstractUser):
         default=Role.EMPLOYEE,
     )
 
+    email = models.EmailField(unique=True)
     phone = models.CharField(max_length=15, blank=True, null=True)
-
     email_verified = models.BooleanField(default=False)
 
     last_login = models.DateTimeField(blank=True, null=True)
+
+    # 2FA
+    is_2fa_enabled = models.BooleanField(default=False)
+    twofa_secret = models.CharField(max_length=64, blank=True, null=True) # Clé TOTP
+
+    USERNAME_FIELD = "email"
+    REQUIRED_FIELDS = []
 
     class Meta:
         verbose_name = _('User')
