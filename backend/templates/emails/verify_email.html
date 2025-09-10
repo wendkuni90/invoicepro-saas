@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        .btn {
+            display: inline-block;
+            padding: 12px 20px;
+            background-color: #0163a9;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .container {
+            font-family: Arial, sans-serif;
+            color: #333;
+            max-width: 600px;
+            margin: auto;
+            border: 1px solid #eee;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        .footer {
+            margin-top: 20px;
+            font-size: 12px;
+            color: #777;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Bienvenue sur InvoicePro 🎉</h2>
+        <p>Bonjour {{ user.email }},</p>
+        <p>Merci de vous être inscrit. Pour activer votre compte, cliquez sur le bouton ci-dessous :</p>
+        <p style="text-align: center;">
+            <a href="{{ link }}" class="btn">Activer mon compte</a>
+        </p>
+        <p><strong>Attention :</strong> ce lien est valide seulement {{ validity_minutes }} minutes.</p>
+        <div class="footer">
+            Si vous n'avez pas demandé cet email, ignorez-le simplement.
+        </div>
+    </div>
+</body>
+</html>

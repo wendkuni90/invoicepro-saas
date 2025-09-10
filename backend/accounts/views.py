@@ -1,6 +1,8 @@
 import pyotp, qrcode
 from io import BytesIO
 from django.core.mail import send_mail
+from django.core.mail import EmailMultiAlternatives
+from django.template.loader import render_to_string
 from django.conf import settings
 from django.contrib.auth import login, logout
 from django.contrib.auth.tokens import default_token_generator
@@ -34,13 +36,33 @@ class RegisterView(generics.CreateAPIView):
         user = serializer.save()
         uid = urlsafe_base64_encode(force_bytes(user.pk))
         token = default_token_generator.make_token(user)
-        link = f"http://localhost:3000/verify-email/{uid}/{token}"
-        send_mail(
-            "Vérifiez votre email - InvoicePro",
-            f"Cliquez sur ce lien pour activer votre compte : {link}",
-            settings.DEFAULT_FROM_EMAIL,
-            [user.email],
-        )
+        # link = f"{settings.FRONTEND_URL}/verify-email/{uid}/{token}" # (Quand le frontend sera fait)
+        link = f"{settings.BACKEND_URL}/api/accounts/verify-email/{uid}/{token}"
+        # send_mail(
+        #     "Vérifiez votre email - InvoicePro",
+        #     f"Cliquez sur ce lien pour activer votre compte (valide 10 minutes) : {link}",
+        #     settings.DEFAULT_FROM_EMAIL,
+        #     [user.email],
+        #     fail_silently=False
+        # )
+        subject = "Vérifiez votre email - InvoicePro"
+        from_email = settings.DEFAULT_FROM_EMAIL
+        to_email = [user.email]
+
+        # Contexte pour le template
+        context = {
+            "user": user,
+            "link": link,
+            "validity_minutes": 10,
+        }
+
+        # Générer contenu texte + HTML
+        text_content = render_to_string("emails/verify_email.txt", context)
+        html_content = render_to_string("emails/verify_email.html", context)
+
+        msg = EmailMultiAlternatives(subject, text_content, from_email, to_email)
+        msg.attach_alternative(html_content, "text/html")
+        msg.send()
 
 # Connexion
 class LoginView(APIView):
@@ -100,13 +122,32 @@ class PasswordResetRequestView(APIView):
 
         uid = urlsafe_base64_encode(force_bytes(user.pk))
         token = default_token_generator.make_token(user)
-        link = f"http://localhost:3000/reset-password/{uid}/{token}"
-        send_mail(
-            "Réinitialisation de mot de passe - InvoicePro",
-            f"Cliquez sur ce lien pour réinitialiser votre mot de passe : {link}",
-            settings.DEFAULT_FROM_EMAIL,
-            [user.email],
-        )
+        # link = f"{settings.FRONTEND_URL}/reset-password/{uid}/{token}" # (Quand il y'aura un frontend fonctionnel)
+        link = f"{settings.BACKEND_URL}/api/accounts/reset-password/{uid}/{token}"
+        # send_mail(
+        #     "Réinitialisation de mot de passe - InvoicePro",
+        #     f"Cliquez sur ce lien pour réinitialiser votre mot de passe (valide 10 minutes) : {link}",
+        #     settings.DEFAULT_FROM_EMAIL,
+        #     [user.email],
+        # )
+        subject = "Réinitialisation de mot de passe - InvoicePro"
+        from_email = settings.DEFAULT_FROM_EMAIL
+        to_email = [user.email]
+
+        context = {
+            "user": user,
+            "link": link,
+            "validity_minutes": 10,
+        }
+
+        # Générer contenu texte + HTML
+        text_content = render_to_string("emails/password_reset.txt", context)
+        html_content = render_to_string("emails/password_reset.html", context)
+
+        msg = EmailMultiAlternatives(subject, text_content, from_email, to_email)
+        msg.attach_alternative(html_content, "text/html")
+        msg.send()
+
         return Response({"detail": "Email de réinitialisation envoyé"})
 
 # Confirmation reset password

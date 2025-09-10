@@ -1,0 +1,8 @@
+Bonjour {{ user.email }},
+
+Merci de vous être inscrit sur InvoicePro 🎉
+
+Cliquez sur ce lien pour activer votre compte (valide {{ validity_minutes }} minutes) :
+{{ link }}
+
+Si vous n'avez pas créé de compte, ignorez cet email.
