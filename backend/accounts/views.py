@@ -74,7 +74,28 @@ class LoginView(APIView):
         user = serializer.validated_data
         tokens = get_tokens_for_user(user)
         login(request, user)
-        return Response({"user": UserSerializer(user).data, "tokens": tokens})
+        response = Response({
+            "user": UserSerializer(user).data,
+            "message": "Login successful"
+        })
+        secure_cookie = not settings.DEBUG
+        response.set_cookie(
+            key="access_token",
+            value=tokens["access"],
+            httponly=True,
+            secure=secure_cookie,
+            samesite='Lax',
+            max_age=60 * 60
+        )
+        response.set_cookie(
+            key="refresh_token",
+            value=tokens["refresh"],
+            httponly=True,
+            secure=secure_cookie,  # True en prod
+            samesite="Lax",
+            max_age=7*24*60*60          # 7 jours
+        )
+        return response
 
 # Déconnexion
 class LogoutView(APIView):
@@ -88,7 +109,11 @@ class LogoutView(APIView):
         except Exception:
             pass
         logout(request)
-        return Response({"detail": "Déconnexion réussie"}, status=status.HTTP_200_OK)
+        response = Response({"detail": "Déconnexion réussie"}, status=200)
+        response.delete_cookie("refresh_token")
+        response.delete_cookie("access_token")
+        return response
+
 
 # Vérification email
 class VerifyEmailView(APIView):
@@ -123,7 +148,7 @@ class PasswordResetRequestView(APIView):
         uid = urlsafe_base64_encode(force_bytes(user.pk))
         token = default_token_generator.make_token(user)
         # link = f"{settings.FRONTEND_URL}/reset-password/{uid}/{token}" # (Quand il y'aura un frontend fonctionnel)
-        link = f"{settings.BACKEND_URL}/api/accounts/reset-password/{uid}/{token}"
+        link = f"{settings.BACKEND_URL}/api/accounts/password-reset-confirm/{uid}/{token}"
         # send_mail(
         #     "Réinitialisation de mot de passe - InvoicePro",
         #     f"Cliquez sur ce lien pour réinitialiser votre mot de passe (valide 10 minutes) : {link}",
@@ -222,3 +247,16 @@ class TwoFAVerifyView(APIView):
             return Response({"detail": "Code 2FA invalide"}, status=400)
 
         return Response({"detail": "2FA validé"})
+
+class CookieTokenRefreshView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        refresh_token = request.COOKIES.get("refresh_token")
+        if not refresh_token:
+            return Response({"detail": "Refresh token manquant"}, status=400)
+        try:
+            refresh = RefreshToken(refresh_token)
+            return Response({"access": str(refresh.access_token)})
+        except Exception:
+            return Response({"detail": "Token invalide ou expiré"}, status=400)
