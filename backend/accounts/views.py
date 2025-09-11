@@ -8,6 +8,8 @@ from django.contrib.auth import login, logout
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes, force_str
+from rest_framework.throttling import ScopedRateThrottle
+from .throttles import LoginRateThrottle
 
 from rest_framework import generics, status
 from rest_framework.views import APIView
@@ -67,8 +69,12 @@ class RegisterView(generics.CreateAPIView):
 # Connexion
 class LoginView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [LoginRateThrottle]  # limite à 3 tentatives / minute
 
     def post(self, request):
+        # passer la request au throttle pour qu’il puisse logger
+        for throttle in self.get_throttles():
+            throttle.request = request
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.validated_data

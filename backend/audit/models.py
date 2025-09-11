@@ -23,9 +23,10 @@ class AuditLog(models.Model):
         USER = 'user', _('User')
         SETTINGS = 'settings', _('Settings')
         ACTIVITY_LOG = 'activity_log', _('Activity Log')
+        LOGIN_THROTTLED = 'login_throttle', _('Login Throttle')
 
 
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='audit_logs')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='audit_logs', null=True, blank=True)
     action_type = models.CharField(max_length=20, choices=ActionType.choices)
     entity_type = models.CharField(max_length=50)  # e.g., 'Invoice', 'Client', etc.
     entity_id = models.PositiveIntegerField()  # ID of the entity being audited
