@@ -1,20 +1,24 @@
 from django.urls import path
 from .views import (
-    CookieTokenRefreshView, RegisterView, LoginView, LogoutView,
+    CookieTokenRefreshView, RegisterView, LoginView, LogoutView, SessionListView, SessionRevokeOthersView, SessionRevokeView,
     VerifyEmailView, PasswordResetRequestView, PasswordResetConfirmView,
     PasswordChangeView, TwoFAEnableView, TwoFAVerifyView
 )
 
 urlpatterns = [
-    path("register/", RegisterView.as_view()),
-    path("login/", LoginView.as_view()),
-    path("logout/", LogoutView.as_view()),
-    path("token/refresh/", CookieTokenRefreshView.as_view()),
-    path("verify-email/<uidb64>/<token>/", VerifyEmailView.as_view()),
-    path("password-reset/", PasswordResetRequestView.as_view()),
-    path("password-reset-confirm/<uidb64>/<token>/", PasswordResetConfirmView.as_view()),
-    path("password-change/", PasswordChangeView.as_view()),
-    path("2fa/enable/", TwoFAEnableView.as_view()),
-    path("2fa/verify/", TwoFAVerifyView.as_view()),
+    path("register", RegisterView.as_view()),
+    path("login", LoginView.as_view()),
+    path("logout", LogoutView.as_view()),
+    path("token/refresh", CookieTokenRefreshView.as_view()),
+    path("verify-email/<uidb64>/<token>", VerifyEmailView.as_view()),
+    path("password-reset", PasswordResetRequestView.as_view()),
+    path("password-reset-confirm/<uidb64>/<token>", PasswordResetConfirmView.as_view()),
+    path("password-change", PasswordChangeView.as_view()),
+    path("2fa/enable", TwoFAEnableView.as_view()),
+    path("2fa/verify", TwoFAVerifyView.as_view()),
+
+    path("sessions/", SessionListView.as_view()),
+    path("sessions/<uuid:session_id>/revoke/", SessionRevokeView.as_view()),
+    path("sessions/revoke-others/", SessionRevokeOthersView.as_view()),
 ]
 

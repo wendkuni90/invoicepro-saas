@@ -1,3 +1,4 @@
+from django.forms import ValidationError
 import pyotp, qrcode
 from io import BytesIO
 from django.core.mail import send_mail
@@ -9,7 +10,16 @@ from django.contrib.auth.tokens import default_token_generator
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes, force_str
 from rest_framework.throttling import ScopedRateThrottle
+
+from .utils_audit import create_audit_log
+from audit.models import AuditLog
 from .throttles import LoginRateThrottle
+from .utils import verify_captcha
+from django.core.cache import cache
+from django.utils import timezone
+
+from .serializers import UserSessionSerializer
+from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
 
 from rest_framework import generics, status
 from rest_framework.views import APIView
@@ -17,7 +27,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import User
+from .models import User, UserSession
 from .serializers import (
     RegisterSerializer, LoginSerializer, UserSerializer,
     VerifyEmailSerializer, PasswordResetRequestSerializer,
@@ -35,6 +45,10 @@ class RegisterView(generics.CreateAPIView):
     permission_classes = [AllowAny]
 
     def perform_create(self, serializer):
+        captcha_token = self.request.data.get("captcha_token")
+        if not captcha_token or not verify_captcha(captcha_token, self.request.META.get("REMOTE_ADDR")):
+            raise ValidationError({"captcha": "Échec de la vérification captcha"})
+
         user = serializer.save()
         uid = urlsafe_base64_encode(force_bytes(user.pk))
         token = default_token_generator.make_token(user)
@@ -69,38 +83,107 @@ class RegisterView(generics.CreateAPIView):
 # Connexion
 class LoginView(APIView):
     permission_classes = [AllowAny]
-    throttle_classes = [LoginRateThrottle]  # limite à 3 tentatives / minute
+    throttle_classes = [LoginRateThrottle]  # limite à 5 tentatives / minute
 
     def post(self, request):
-        # passer la request au throttle pour qu’il puisse logger
-        for throttle in self.get_throttles():
-            throttle.request = request
+        ip = request.META.get("REMOTE_ADDR", "unknown")
+        fail_key = f"login_failures_{ip}"
+
+        # Captcha requis après 3 échecs
+        if cache.get(fail_key, 0) >= 3:
+            captcha_token = request.data.get("captcha_token")
+            if not captcha_token or not verify_captcha(captcha_token, ip):
+                return Response(
+                    {"detail": "Captcha requis ou invalide"},
+                    status=400
+                )
+
+        # Validation des identifiants
         serializer = LoginSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        user = serializer.validated_data
+        try:
+            serializer.is_valid(raise_exception=True)
+        except ValidationError:
+            # incrémente compteur échecs (expire en 5 min)
+            cache.set(fail_key, cache.get(fail_key, 0) + 1, timeout=300)
+            # Audit login failed
+            create_audit_log(
+                user=None,
+                action_type=AuditLog.ActionType.LOGIN,
+                request=request,
+                response_status=400,
+                response_body=serializer.errors,
+                entity_type="AUTH",
+                changes={"result": "FAILED"}
+            )
+            raise
+
+        # Login réussi → reset compteur
+        cache.delete(fail_key)
+
+        user: User = serializer.validated_data
         tokens = get_tokens_for_user(user)
+        refresh_obj = RefreshToken(tokens["refresh"])
+        refresh_jti = str(refresh_obj["jti"])
+        ip = request.META.get("REMOTE_ADDR", "unknown")
+        ua = request.META.get("HTTP_USER_AGENT", "unknown")
+
+        user_session = UserSession.objects.create(
+            user=user,
+            refresh_jti=refresh_jti,
+            ip_address=ip,
+            user_agent=ua,
+            last_activity=timezone.now(),
+        )
+
         login(request, user)
+
+        # Réponse + cookies sécurisés
         response = Response({
             "user": UserSerializer(user).data,
             "message": "Login successful"
         })
-        secure_cookie = not settings.DEBUG
+
+        secure_cookie = not settings.DEBUG  # True en prod
+
         response.set_cookie(
             key="access_token",
             value=tokens["access"],
             httponly=True,
             secure=secure_cookie,
-            samesite='Lax',
-            max_age=60 * 60
+            samesite="Lax",   # Strict si même domaine, None si sous-domaines HTTPS
+            max_age=60 * 60   # 1h
         )
+
         response.set_cookie(
             key="refresh_token",
             value=tokens["refresh"],
             httponly=True,
-            secure=secure_cookie,  # True en prod
+            secure=secure_cookie,
             samesite="Lax",
-            max_age=7*24*60*60          # 7 jours
+            max_age=7 * 24 * 60 * 60  # 7 jours
         )
+
+        # cookie de session (identifie la session courante côté client)
+        response.set_cookie(
+            key="session_id",
+            value=str(user_session.session_id),
+            httponly=True,
+            secure=secure_cookie,
+            samesite="Lax",
+            max_age=7 * 24 * 60 * 60
+        )
+
+        # Audit login success
+        create_audit_log(
+            user=user,
+            action_type=AuditLog.ActionType.LOGIN,
+            request=request,
+            response_status=200,
+            response_body={"message": "Login successful"},
+            entity_type="AUTH",
+            changes={"result": "SUCCESS"}
+        )
+
         return response
 
 # Déconnexion
@@ -114,10 +197,24 @@ class LogoutView(APIView):
             token.blacklist()
         except Exception:
             pass
+
         logout(request)
+
         response = Response({"detail": "Déconnexion réussie"}, status=200)
         response.delete_cookie("refresh_token")
         response.delete_cookie("access_token")
+
+        # Audit logout
+        create_audit_log(
+            user=request.user,
+            action_type=AuditLog.ActionType.LOGOUT,
+            request=request,
+            response_status=200,
+            response_body={"detail": "Déconnexion réussie"},
+            entity_type="AUTH",
+            changes={"result": "SUCCESS"}
+        )
+
         return response
 
 
@@ -233,6 +330,18 @@ class TwoFAEnableView(APIView):
         otp_uri = pyotp.totp.TOTP(secret).provisioning_uri(
             name=user.email, issuer_name="InvoicePro"
         )
+
+        # Audit
+        create_audit_log(
+            user=user,
+            action_type=AuditLog.ActionType.ACTIVITY_LOG,
+            request=request,
+            response_status=200,
+            response_body={"detail": "2FA activé"},
+            entity_type="AUTH",
+            changes={"result": "2FA_ENABLED"}
+        )
+
         return Response({"secret": secret, "otp_uri": otp_uri})
 
 # 2FA vérification
@@ -250,7 +359,26 @@ class TwoFAVerifyView(APIView):
 
         totp = pyotp.TOTP(user.twofa_secret)
         if not totp.verify(token):
+            create_audit_log(
+                user=user,
+                action_type=AuditLog.ActionType.ACTIVITY_LOG,
+                request=request,
+                response_status=400,
+                response_body={"detail": "Code 2FA invalide"},
+                entity_type="AUTH",
+                changes={"result": "2FA_FAILED"}
+            )
             return Response({"detail": "Code 2FA invalide"}, status=400)
+
+        create_audit_log(
+            user=user,
+            action_type=AuditLog.ActionType.ACTIVITY_LOG,
+            request=request,
+            response_status=200,
+            response_body={"detail": "2FA validé"},
+            entity_type="AUTH",
+            changes={"result": "2FA_VERIFIED"}
+        )
 
         return Response({"detail": "2FA validé"})
 
@@ -266,3 +394,71 @@ class CookieTokenRefreshView(APIView):
             return Response({"access": str(refresh.access_token)})
         except Exception:
             return Response({"detail": "Token invalide ou expiré"}, status=400)
+
+class SessionListView(generics.ListAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = UserSessionSerializer
+
+    def get_queryset(self):
+        return UserSession.objects.filter(user=self.request.user).order_by("-last_activity")
+
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        ctx["request"] = self.request
+        return ctx
+
+
+class SessionRevokeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, session_id):
+        try:
+            session = UserSession.objects.get(user=request.user, session_id=session_id, revoked=False)
+        except UserSession.DoesNotExist:
+            return Response({"detail": "Session introuvable ou déjà révoquée"}, status=404)
+
+        # Blacklist du refresh associé via le jti
+        try:
+            ot = OutstandingToken.objects.get(jti=session.refresh_jti, user=request.user)
+            BlacklistedToken.objects.get_or_create(outstanding_token=ot)
+        except OutstandingToken.DoesNotExist:
+            pass  # si pas trouvé, on révoque quand même la session applicative
+
+        session.revoked = True
+        session.revoked_at = timezone.now()
+        session.revoked_reason = "Revoked by user"
+        session.save(update_fields=["revoked", "revoked_at", "revoked_reason"])
+
+        # Si on révoque la session courante → on supprime aussi les cookies côté client
+        current = request.COOKIES.get("session_id")
+        response = Response({"detail": "Session révoquée"}, status=200)
+        if current and str(session.session_id) == current:
+            response.delete_cookie("access_token")
+            response.delete_cookie("refresh_token")
+            response.delete_cookie("session_id")
+        return response
+
+
+class SessionRevokeOthersView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        current = request.COOKIES.get("session_id")
+        qs = UserSession.objects.filter(user=request.user, revoked=False)
+        if current:
+            qs = qs.exclude(session_id=current)
+
+        count = 0
+        for s in qs:
+            try:
+                ot = OutstandingToken.objects.get(jti=s.refresh_jti, user=request.user)
+                BlacklistedToken.objects.get_or_create(outstanding_token=ot)
+            except OutstandingToken.DoesNotExist:
+                pass
+            s.revoked = True
+            s.revoked_at = timezone.now()
+            s.revoked_reason = "Revoked others by user"
+            s.save(update_fields=["revoked", "revoked_at", "revoked_reason"])
+            count += 1
+
+        return Response({"detail": f"{count} session(s) révoquée(s)"}, status=200)

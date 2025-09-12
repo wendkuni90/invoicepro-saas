@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import authenticate
-from .models import User
+from .models import User, UserSession
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
@@ -52,3 +52,14 @@ class PasswordChangeSerializer(serializers.Serializer):
 class TwoFASerializer(serializers.Serializer):
     token = serializers.CharField()
 
+class UserSessionSerializer(serializers.ModelSerializer):
+    current = serializers.SerializerMethodField()
+
+    class Meta:
+        model = UserSession
+        fields = ["session_id", "ip_address", "user_agent", "device_name",
+                    "created_at", "last_activity", "revoked", "current"]
+
+    def get_current(self, obj):
+        request = self.context.get("request")
+        return str(obj.session_id) == request.COOKIES.get("session_id")

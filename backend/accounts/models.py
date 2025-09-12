@@ -1,6 +1,9 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.utils.translation import gettext_lazy as _
+import uuid
+from django.utils import timezone
+from django.conf import settings
 
 class CustomUserManager(BaseUserManager):
     """Manager personnalisé pour utiliser email comme identifiant"""
@@ -59,3 +62,25 @@ class User(AbstractUser):
 
     def __str__(self):
         return f"{self.email} ({self.get_role_display()})"
+
+
+# ========== SESSIONS ==========
+class UserSession(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="sessions")
+    session_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)  # pour le cookie "session_id"
+    refresh_jti = models.CharField(max_length=64, db_index=True)  # JTI du refresh JWT
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=255, null=True, blank=True)
+    device_name = models.CharField(max_length=100, null=True, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    last_activity = models.DateTimeField(default=timezone.now)
+    revoked = models.BooleanField(default=False)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    revoked_reason = models.CharField(max_length=255, null=True, blank=True)
+
+    class Meta:
+        ordering = ["-last_activity"]
+
+    def __str__(self):
+        return f"{self.user.email} - {self.session_id}"
+
